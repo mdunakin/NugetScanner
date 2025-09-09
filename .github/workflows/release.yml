@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"   # e.g., v1.0.0
+
+jobs:
+  build-and-package:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore
+        run: nuget restore NugetScanner.sln
+
+      - name: Build Release (x64)
+        run: msbuild NugetScanner.sln /p:Configuration=Release /p:Platform="Any CPU" /m
+
+      - name: Find output & package
+        id: pkg
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}".TrimStart('v')
+          $outDir  = Get-ChildItem -Recurse -Directory -Filter Release | Where-Object { Test-Path "$($_.FullName)\*.exe" } | Select-Object -First 1
+          if (-not $outDir) { throw "Could not find Release output folder with .exe" }
+          $zip = "NugetScanner-$version-windows-x64.zip"
+          Compress-Archive -Path (Join-Path $outDir.FullName '*') -DestinationPath $zip -Force
+          echo "zip=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.pkg.outputs.zip }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

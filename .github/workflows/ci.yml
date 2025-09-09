@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # Restore packages for classic packages.config solutions
+      - name: NuGet restore
+        uses: NuGet/setup-nuget@v2
+      - run: nuget restore NugetScanner.sln
+
+      # Build with MSBuild (VS is preinstalled on windows-latest)
+      - name: Build Release
+        run: msbuild NugetScanner.sln /p:Configuration=Release /m
+
+      # Keep the binaries from the console app
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NugetScanner-Release-bin
+          path: |
+            **/bin/Release/**
