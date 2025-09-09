@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"   # e.g. v1.0.0
 
+permissions:
+  contents: write   # <-- needed to create the GitHub Release
+
 jobs:
   build-and-release:
     runs-on: windows-latest
@@ -13,7 +16,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # keep history for tag-based versioning
+          fetch-depth: 0
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
@@ -39,42 +42,42 @@ jobs:
         id: pkg
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $version = "${env:GITHUB_REF_NAME}".TrimStart('v')
-          $outDir  = "NugetScanner\bin\Release"
 
-          if (-not (Test-Path $outDir)) {
-            throw "Could not find expected output folder: $outDir"
-          }
+          $ws     = $env:GITHUB_WORKSPACE
+          $outDir = Join-Path $ws 'NugetScanner\bin\Release'
+          if (-not (Test-Path $outDir)) { throw "Could not find output folder: $outDir" }
 
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $dist = Join-Path $ws 'dist'
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
+
           $zipName = "NugetScanner-$version-windows.zip"
-          $zipPath = Join-Path dist $zipName
+          $zipPath = Join-Path $dist $zipName
 
           Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zipPath -Force
 
           # Create checksum
-          $checksumFile = "$zipPath.sha256"
+          $checksumPath = "$zipPath.sha256"
           $sha = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash
-          "$sha  $zipName" | Out-File -FilePath $checksumFile -Encoding ASCII -Force
+          "$sha  $zipName" | Out-File -FilePath $checksumPath -Encoding ASCII -Force
 
-          "zip=$zipPath"        | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "checksum=$checksumFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # Expose outputs using forward slashes (glob expects / on all OSes)
+          $zipRel = "dist/$zipName"
+          $chkRel = "dist/$zipName.sha256"
+          "zip=$zipRel"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "checksum=$chkRel" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload build artifacts (for debugging/download)
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assets
-          path: |
-            dist/*.zip
-            dist/*.sha256
-          if-no-files-found: error
+      - name: Show packaged files
+        shell: bash
+        run: ls -la dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ steps.pkg.outputs.zip }}
-            ${{ steps.pkg.outputs.checksum }}
+            dist/*.zip
+            dist/*.zip.sha256
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
