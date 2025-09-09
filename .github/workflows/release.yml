@@ -3,41 +3,78 @@ name: Release
 on:
   push:
     tags:
-      - "v*"   # e.g., v1.0.0
+      - "v*"   # e.g. v1.0.0
 
 jobs:
-  build-and-package:
+  build-and-release:
     runs-on: windows-latest
+
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # keep history for tag-based versioning
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
 
+      - name: Cache NuGet packages (packages.config)
+        uses: actions/cache@v4
+        with:
+          path: packages
+          key: nuget-packages-${{ hashFiles('**/packages.config') }}
+          restore-keys: |
+            nuget-packages-
+
       - name: Restore
         run: nuget restore NugetScanner.sln
 
-      - name: Build Release (x64)
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release)
         run: msbuild NugetScanner.sln /p:Configuration=Release /p:Platform="Any CPU" /m
 
-      - name: Find output & package
+      - name: Package artifacts
         id: pkg
         shell: pwsh
         run: |
           $version = "${env:GITHUB_REF_NAME}".TrimStart('v')
-          $outDir  = Get-ChildItem -Recurse -Directory -Filter Release | Where-Object { Test-Path "$($_.FullName)\*.exe" } | Select-Object -First 1
-          if (-not $outDir) { throw "Could not find Release output folder with .exe" }
-          $zip = "NugetScanner-$version-windows-x64.zip"
-          Compress-Archive -Path (Join-Path $outDir.FullName '*') -DestinationPath $zip -Force
-          echo "zip=$zip" >> $env:GITHUB_OUTPUT
+          $outDir  = "NugetScanner\bin\Release"
+
+          if (-not (Test-Path $outDir)) {
+            throw "Could not find expected output folder: $outDir"
+          }
+
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $zipName = "NugetScanner-$version-windows.zip"
+          $zipPath = Join-Path dist $zipName
+
+          Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zipPath -Force
+
+          # Create checksum
+          $checksumFile = "$zipPath.sha256"
+          $sha = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash
+          "$sha  $zipName" | Out-File -FilePath $checksumFile -Encoding ASCII -Force
+
+          "zip=$zipPath"        | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "checksum=$checksumFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload build artifacts (for debugging/download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.pkg.outputs.zip }}
+          files: |
+            ${{ steps.pkg.outputs.zip }}
+            ${{ steps.pkg.outputs.checksum }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
