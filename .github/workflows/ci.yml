@@ -8,23 +8,35 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Check out
         uses: actions/checkout@v4
 
-      # Restore packages for classic packages.config solutions
-      - name: NuGet restore
+      - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
-      - run: nuget restore NugetScanner.sln
 
-      # Build with MSBuild (VS is preinstalled on windows-latest)
-      - name: Build Release
-        run: msbuild NugetScanner.sln /p:Configuration=Release /m
+      - name: Cache NuGet packages (packages.config)
+        uses: actions/cache@v4
+        with:
+          path: packages
+          key: nuget-packages-${{ hashFiles('**/packages.config') }}
+          restore-keys: |
+            nuget-packages-
 
-      # Keep the binaries from the console app
-      - name: Upload build artifact
+      - name: Restore
+        run: nuget restore NugetScanner.sln
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release)
+        run: msbuild NugetScanner.sln /p:Configuration=Release /p:Platform="Any CPU" /m
+
+      - name: Upload Release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: NugetScanner-Release-bin
           path: |
             **/bin/Release/**
+          if-no-files-found: error
