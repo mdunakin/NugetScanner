@@ -33,6 +33,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup>
+    <!-- Keep defaults; PackPlugin target recalculates these after OutDir is resolved -->
     <PluginPackageDir>$(OutDir)plugin-package\</PluginPackageDir>
     <AgentStageDir>$(OutDir)agent-staging\</AgentStageDir>
   </PropertyGroup>
@@ -136,6 +137,11 @@
           SkipUnchangedFiles="true" />
   </Target>
   <Target Name="PackPlugin" AfterTargets="Build">
+    <!-- Re-evaluate paths now that OutDir has its final value -->
+    <PropertyGroup>
+      <PluginPackageDir>$(OutDir)plugin-package\</PluginPackageDir>
+      <AgentStageDir>$(OutDir)agent-staging\</AgentStageDir>
+    </PropertyGroup>
     <!-- Stage full plugin structure under $(OutDir)plugin-package -->
     <RemoveDir Directories="$(PluginPackageDir)" Condition="Exists('$(PluginPackageDir)')" />
     <RemoveDir Directories="$(AgentStageDir)" Condition="Exists('$(AgentStageDir)')" />
