@@ -18,7 +18,7 @@ This was created to gate build server builds with nuget package issues. The dotn
 
 - Plugin archive layout produced by CI/Release pipelines:
   ```
-  plugin.zip
+  NugetScanner-teamcity-plugin.zip
     teamcity-plugin.xml      (server descriptor)
     agent/
       NugetScanner-agent.zip
@@ -32,18 +32,18 @@ This was created to gate build server builds with nuget package issues. The dotn
      - `teamcity-plugin.xml` (server descriptor)
      - `agent/NugetScanner-agent.zip` with its own `teamcity-plugin.xml` (agent descriptor) and `lib/*`.
   3. Zip the *contents* of `NugetScanner\bin\Release\plugin-package\` (not the folder itself) to `NugetScanner-teamcity-plugin.zip`.
-  4. Upload the ZIP under Administration → Plugins List → Upload plugin zip on your TeamCity server.
+  4. Upload the ZIP under Administration -> Plugins List -> Upload plugin zip on your TeamCity server.
      The plugin is agent-only; no server UI is required.
 
 ## Usage in a TeamCity build
 
-1. Install the plugin ZIP in TeamCity (Administration → Plugins List → Upload plugin zip) and let agents restart.
+1. Install the plugin ZIP in TeamCity (Administration -> Plugins List -> Upload plugin zip) and let agents restart.
 2. In the build configuration, add a Command Line build step before tests/packages:
    ```
    "%teamcity.tool.NugetScanner%\NugetScanner.exe" -f "%teamcity.build.checkoutDir%"
    ```
    You may omit `-f` to let the tool default to `TEAMCITY_BUILD_CHECKOUTDIR`.
-3. Keep “Fail build on non-zero exit code” enabled. The scanner exits non-zero when it finds vulnerable or deprecated packages (exit code 20) or on errors (exit code 30).
+3. Keep "Fail build on non-zero exit code" enabled. The scanner exits non-zero when it finds vulnerable or deprecated packages (exit code 20) or on errors (exit code 30).
 4. Results:
    - Vulnerable or deprecated packages are reported as TeamCity build problems with IDs `nugetscanner_{package}_{version}`.
    - The build status is set to failure when issues are found.
