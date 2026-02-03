@@ -38,24 +38,33 @@ jobs:
       - name: Build (Release)
         run: msbuild NugetScanner.sln /p:Configuration=Release /p:Platform="Any CPU" /m
 
-      - name: Package artifacts
+      - name: Verify TeamCity descriptor
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE 'NugetScanner\bin\Release\teamcity-plugin.xml'
+          if (-not (Test-Path $root)) { Write-Error "teamcity-plugin.xml not found in output: $root" }
+          $agent = Join-Path $env:GITHUB_WORKSPACE 'NugetScanner\bin\Release\agent\lib\teamcity-agent-plugin.xml'
+          if (-not (Test-Path $agent)) { Write-Error "teamcity-agent-plugin.xml not found in agent/lib: $agent" }
+
+      - name: Package TeamCity plugin
         id: pkg
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $ws     = $env:GITHUB_WORKSPACE
           $version = "${env:GITHUB_REF_NAME}".TrimStart('v')
 
-          $ws     = $env:GITHUB_WORKSPACE
-          $outDir = Join-Path $ws 'NugetScanner\bin\Release'
-          if (-not (Test-Path $outDir)) { throw "Could not find output folder: $outDir" }
+          $pluginRoot = Join-Path $ws 'NugetScanner\bin\Release\plugin-package'
+          if (-not (Test-Path $pluginRoot)) { throw "Could not find plugin-package folder: $pluginRoot" }
 
           $dist = Join-Path $ws 'dist'
           New-Item -ItemType Directory -Path $dist -Force | Out-Null
 
-          $zipName = "NugetScanner-$version-windows.zip"
+          $zipName = "NugetScanner-teamcity-plugin-$version.zip"
           $zipPath = Join-Path $dist $zipName
 
-          Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zipPath -Force
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path (Join-Path $pluginRoot '*') -DestinationPath $zipPath -Force
 
           # Create checksum
           $checksumPath = "$zipPath.sha256"

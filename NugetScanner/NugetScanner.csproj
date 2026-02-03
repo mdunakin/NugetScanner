@@ -32,6 +32,10 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
+  <PropertyGroup>
+    <PluginPackageDir>$(OutDir)plugin-package\</PluginPackageDir>
+    <AgentStageDir>$(OutDir)agent-staging\</AgentStageDir>
+  </PropertyGroup>
   <ItemGroup>
     <Reference Include="CommandLine, Version=2.9.1.0, Culture=neutral, PublicKeyToken=5a870481e358d379, processorArchitecture=MSIL">
       <HintPath>..\packages\CommandLineParser.2.9.1\lib\net461\CommandLine.dll</HintPath>
@@ -114,6 +118,52 @@
   <ItemGroup>
     <None Include="App.config" />
     <None Include="packages.config" />
+    <None Include="teamcity-plugin.xml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Include="teamcity-agent-plugin.xml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
+  <Target Name="BuildPluginLayout" AfterTargets="Build">
+    <ItemGroup>
+      <PluginPayload Include="$(OutDir)*.*"
+                     Exclude="$(OutDir)agent\**;$(OutDir)*.tmp;$(OutDir)teamcity-plugin.xml" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutDir)agent\lib" />
+    <Copy SourceFiles="@(PluginPayload)"
+          DestinationFiles="@(PluginPayload->'$(OutDir)agent\\lib\\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PackPlugin" AfterTargets="Build">
+    <!-- Stage full plugin structure under $(OutDir)plugin-package -->
+    <RemoveDir Directories="$(PluginPackageDir)" Condition="Exists('$(PluginPackageDir)')" />
+    <RemoveDir Directories="$(AgentStageDir)" Condition="Exists('$(AgentStageDir)')" />
+    <MakeDir Directories="$(PluginPackageDir)agent" />
+    <MakeDir Directories="$(AgentStageDir)lib" />
+
+    <!-- Root (server) descriptor -->
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\teamcity-plugin.xml"
+          DestinationFiles="$(PluginPackageDir)teamcity-plugin.xml"
+          SkipUnchangedFiles="true" />
+
+    <!-- Agent descriptor and payload -->
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\teamcity-agent-plugin.xml"
+          DestinationFiles="$(AgentStageDir)teamcity-plugin.xml"
+          SkipUnchangedFiles="true" />
+
+    <ItemGroup>
+      <AgentLibFiles Include="$(OutDir)agent\lib\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AgentLibFiles)"
+          DestinationFiles="@(AgentLibFiles->'$(AgentStageDir)lib\\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+
+    <!-- Zip agent plugin into agent folder -->
+    <PropertyGroup>
+      <AgentZip>$(PluginPackageDir)agent\NugetScanner-agent.zip</AgentZip>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Compress-Archive -Path &apos;$(AgentStageDir)*&apos; -DestinationPath &apos;$(AgentZip)&apos; -Force&quot;" />
+  </Target>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

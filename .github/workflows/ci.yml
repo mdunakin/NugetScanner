@@ -33,10 +33,33 @@ jobs:
       - name: Build (Release)
         run: msbuild NugetScanner.sln /p:Configuration=Release /p:Platform="Any CPU" /m
 
-      - name: Upload Release artifacts
+      - name: Verify TeamCity descriptor
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE 'NugetScanner\bin\Release\teamcity-plugin.xml'
+          if (-not (Test-Path $root)) { Write-Error "teamcity-plugin.xml not found in output: $root" }
+          $agent = Join-Path $env:GITHUB_WORKSPACE 'NugetScanner\bin\Release\agent\lib\teamcity-agent-plugin.xml'
+          if (-not (Test-Path $agent)) { Write-Error "teamcity-agent-plugin.xml not found in agent/lib: $agent" }
+
+      - name: Package TeamCity plugin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ws = $env:GITHUB_WORKSPACE
+
+          $pluginRoot = Join-Path $ws 'NugetScanner\bin\Release\plugin-package'
+          if (-not (Test-Path $pluginRoot)) { Write-Error "plugin-package directory not found: $pluginRoot" }
+
+          $distDir = Join-Path $ws 'dist'
+          New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+          $zipPath = Join-Path $distDir 'NugetScanner-teamcity-plugin.zip'
+
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path (Join-Path $pluginRoot '*') -DestinationPath $zipPath
+
+      - name: Upload plugin artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NugetScanner-Release-bin
-          path: |
-            **/bin/Release/**
+          name: NugetScanner-teamcity-plugin
+          path: dist/NugetScanner-teamcity-plugin.zip
           if-no-files-found: error

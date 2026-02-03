@@ -11,6 +11,7 @@ using NuGet.Protocol.Core.Types;
 using NuGet.Versioning;
 using System.Threading;
 using System.Configuration;
+using System.Text;
 
 namespace NugetScanner
 {
@@ -23,50 +24,65 @@ namespace NugetScanner
             try
             {
                 log4net.Config.XmlConfigurator.Configure();
-                var filePath = "";
-                Parser.Default.ParseArguments<Options>(args).WithParsed(o => { filePath = o.FilePath; });
-                Log.Info($"Scanning {filePath} on {Environment.MachineName}");
-                if (!Directory.Exists(filePath))
+                var reporter = BuildReporter();
+
+                var filePath = ResolveFilePath(args, reporter);
+                reporter.Info($"Scanning {filePath} on {Environment.MachineName}");
+                if (string.IsNullOrWhiteSpace(filePath) || !Directory.Exists(filePath))
                 {
-                    Log.Error($"file path {filePath} does not exist on machine {Environment.MachineName}");
+                    reporter.BuildProblem("nugetscanner_path_missing",
+                        $"Scan path '{filePath}' does not exist on {Environment.MachineName}");
                     Environment.Exit((int)ExitCode.DirectoryToScanDoesNotExist);
                 }
 
                 var packageReferences = new List<PackageRef>();
                 var hasIssues = false;
+                var issueCount = 0;
 
-                Log.Info("Scanning for packages.config files...");
+                reporter.Info("Scanning for packages.config files...");
                 foreach (var configFile in Directory.GetFiles(filePath, "packages.config", SearchOption.AllDirectories))
                 {
-                    Log.Debug($"Found: {configFile}");
+                    reporter.Debug($"Found: {configFile}");
                     packageReferences.AddRange(ReadPackagesConfig(configFile));
                 }
 
-                Log.Info("Scanning for .csproj/.vbproj files...");
+                reporter.Info("Scanning for .csproj/.vbproj files...");
                 foreach (var projectFile in Directory.GetFiles(filePath, "*.*proj", SearchOption.AllDirectories)
                              .Where(file => file.EndsWith(".csproj") || file.EndsWith(".vbproj")))
                 {
-                    Log.Debug($"Found: {projectFile}");
+                    reporter.Debug($"Found: {projectFile}");
                     packageReferences.AddRange(ReadProjectFile(projectFile));
                 }
 
                 var distinctPackages = packageReferences.Distinct().ToList();
-                Log.Info($"Found {distinctPackages.Count} unique packages.");
+                reporter.Info($"Found {distinctPackages.Count} unique packages.");
 
                 foreach (var pkg in distinctPackages)
                 {
                     var status = QueryNuGet(pkg.Id, pkg.Version);
-                    Log.Info(
+                    reporter.Info(
                         $"{pkg.Id} {pkg.Version} => {(status.IsVulnerable ? "[VULNERABLE]" : "")} {(status.IsDeprecated ? "[DEPRECATED]" : "")}");
 
                     if (status.IsDeprecated || status.IsVulnerable)
                     {
                         hasIssues = true;
+                        issueCount++;
+                        var reasons = new List<string>();
+                        if (status.IsVulnerable) reasons.Add("vulnerable");
+                        if (status.IsDeprecated) reasons.Add("deprecated");
+                        reporter.BuildProblem(
+                            $"nugetscanner_{pkg.Id}_{pkg.Version}".ToLowerInvariant(),
+                            $"Package {pkg.Id} {pkg.Version} is {string.Join(" and ", reasons)}");
                     }
                 }
 
 
-                Log.Info("Scan complete.");
+                reporter.Info("Scan complete.");
+
+                if (hasIssues)
+                {
+                    reporter.BuildStatusFailure($"NuGetScanner found {issueCount} package issue(s).");
+                }
 
                 var exitCode = hasIssues ? (int)ExitCode.DeprecatedOrVulnerable : (int)ExitCode.Success;
                 Environment.Exit(exitCode);
@@ -90,7 +106,7 @@ namespace NugetScanner
 
         public class Options
         {
-            [Option('f', "filePath", Required = true, HelpText = "File Path to the project you would like to scan")]
+            [Option('f', "filePath", Required = false, HelpText = "File Path to the project you would like to scan")]
             public string FilePath { get; set; }
         }
 
@@ -107,6 +123,28 @@ namespace NugetScanner
             public string Id { get; set; }
             public string Version { get; set; }
 
+        }
+
+        private static string ResolveFilePath(string[] args, IReporter reporter)
+        {
+            string filePath = null;
+
+            Parser.Default.ParseArguments<Options>(args).WithParsed(o => { filePath = o.FilePath; });
+
+            if (!string.IsNullOrWhiteSpace(filePath))
+            {
+                return Path.GetFullPath(filePath);
+            }
+
+            var teamcityPath = Environment.GetEnvironmentVariable("TEAMCITY_BUILD_CHECKOUTDIR");
+            if (!string.IsNullOrWhiteSpace(teamcityPath))
+            {
+                reporter.Info($"No filePath provided, defaulting to TeamCity checkout directory '{teamcityPath}'.");
+                return Path.GetFullPath(teamcityPath);
+            }
+
+            reporter.Info("No filePath provided, defaulting to current directory.");
+            return Directory.GetCurrentDirectory();
         }
 
 
@@ -174,6 +212,143 @@ namespace NugetScanner
             }
 
             return status;
+        }
+
+        private static IReporter BuildReporter()
+        {
+            var reporters = new List<IReporter>
+            {
+                new LogReporter(Log)
+            };
+
+            if (TeamCityReporter.IsTeamCity)
+            {
+                reporters.Add(new TeamCityReporter());
+            }
+
+            return new CompositeReporter(reporters);
+        }
+    }
+
+    internal interface IReporter
+    {
+        void Info(string message);
+        void Debug(string message);
+        void BuildProblem(string identity, string description);
+        void BuildStatusFailure(string text);
+    }
+
+    internal class CompositeReporter : IReporter
+    {
+        private readonly IEnumerable<IReporter> _reporters;
+
+        public CompositeReporter(IEnumerable<IReporter> reporters)
+        {
+            _reporters = reporters;
+        }
+
+        public void Info(string message)
+        {
+            foreach (var reporter in _reporters) reporter.Info(message);
+        }
+
+        public void Debug(string message)
+        {
+            foreach (var reporter in _reporters) reporter.Debug(message);
+        }
+
+        public void BuildProblem(string identity, string description)
+        {
+            foreach (var reporter in _reporters) reporter.BuildProblem(identity, description);
+        }
+
+        public void BuildStatusFailure(string text)
+        {
+            foreach (var reporter in _reporters) reporter.BuildStatusFailure(text);
+        }
+    }
+
+    internal class LogReporter : IReporter
+    {
+        private readonly ILog _log;
+
+        public LogReporter(ILog log)
+        {
+            _log = log;
+        }
+
+        public void Info(string message) => _log.Info(message);
+        public void Debug(string message) => _log.Debug(message);
+
+        public void BuildProblem(string identity, string description)
+        {
+            _log.Error($"{identity}: {description}");
+        }
+
+        public void BuildStatusFailure(string text)
+        {
+            _log.Error(text);
+        }
+    }
+
+    internal class TeamCityReporter : IReporter
+    {
+        public static bool IsTeamCity => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TEAMCITY_VERSION"));
+
+        public void Info(string message)
+        {
+            Console.WriteLine($"##teamcity[message text='{Escape(message)}' status='NORMAL']");
+        }
+
+        public void Debug(string message)
+        {
+            Console.WriteLine($"##teamcity[message text='{Escape(message)}' status='NORMAL']");
+        }
+
+        public void BuildProblem(string identity, string description)
+        {
+            Console.WriteLine($"##teamcity[buildProblem identity='{Escape(identity)}' description='{Escape(description)}']");
+        }
+
+        public void BuildStatusFailure(string text)
+        {
+            Console.WriteLine($"##teamcity[buildStatus status='FAILURE' text='{Escape(text)}']");
+        }
+
+        private static string Escape(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+
+            var builder = new StringBuilder(value.Length);
+            foreach (var c in value)
+            {
+                switch (c)
+                {
+                    case '|':
+                        builder.Append("||");
+                        break;
+                    case '\'':
+                        builder.Append("|'");
+                        break;
+                    case '\n':
+                        builder.Append("|n");
+                        break;
+                    case '\r':
+                        builder.Append("|r");
+                        break;
+                    case '[':
+                        builder.Append("|[");
+                        break;
+                    case ']':
+                        builder.Append("|]");
+                        break;
+                    default:
+                        builder.Append(c);
+                        break;
+                }
+            }
+
+            return builder.ToString();
         }
     }
 }
