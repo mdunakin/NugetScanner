@@ -30,8 +30,8 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build (Release)
-        run: msbuild NugetScanner.sln /p:Configuration=Release /p:Platform="Any CPU" /m
+      - name: Build + PackPlugin (Release)
+        run: msbuild NugetScanner.sln /p:Configuration=Release /p:Platform="Any CPU" /m /t:Build;PackPlugin
 
       - name: Verify TeamCity descriptor
         shell: pwsh
