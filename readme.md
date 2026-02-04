@@ -40,7 +40,7 @@ This was created to gate build server builds with nuget package issues. The dotn
 1. Install the plugin ZIP in TeamCity (Administration -> Plugins List -> Upload plugin zip) and let agents restart.
 2. In the build configuration, add a Command Line build step before tests/packages:
    ```
-   "%teamcity.tool.NugetScanner%\NugetScanner.exe" -f "%teamcity.build.checkoutDir%"
+   "%teamcity.tool.NugetScanner-agent%\lib\NugetScanner.exe" -f "%teamcity.build.checkoutDir%"
    ```
    You may omit `-f` to let the tool default to `TEAMCITY_BUILD_CHECKOUTDIR`.
 3. Keep "Fail build on non-zero exit code" enabled. The scanner exits non-zero when it finds vulnerable or deprecated packages (exit code 20) or on errors (exit code 30).
